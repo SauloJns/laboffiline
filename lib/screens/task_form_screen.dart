@@ -5,6 +5,7 @@ import '../services/database_service.dart';
 import '../services/camera_service.dart';
 import '../services/location_service.dart';
 import '../widgets/location_picker.dart';
+import '../services/connectivity_service.dart';
 import '../widgets/photo_gallery.dart';
 import '../screens/photo_viewer_screen.dart';
 
@@ -233,73 +234,88 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
     );
   }
 
-  Future<void> _saveTask() async {
-    if (!_formKey.currentState!.validate()) return;
+ Future<void> _saveTask() async {
+  if (!_formKey.currentState!.validate()) return;
 
-    setState(() => _isLoading = true);
+  setState(() => _isLoading = true);
 
-    try {
-      if (widget.task == null) {
-        final newTask = Task(
-          title: _titleController.text.trim(),
-          description: _descriptionController.text.trim(),
-          priority: _priority,
-          completed: _completed,
-          photoPaths: _photoPaths,
-          latitude: _latitude,
-          longitude: _longitude,
-          locationName: _locationName,
-          dueDate: _dueDate,
-        );
+  try {
+    final isOnline = ConnectivityService.instance.isOnline;
+    
+    if (widget.task == null) {
+      final newTask = Task(
+        title: _titleController.text.trim(),
+        description: _descriptionController.text.trim(),
+        priority: _priority,
+        completed: _completed,
+        photoPaths: _photoPaths,
+        latitude: _latitude,
+        longitude: _longitude,
+        locationName: _locationName,
+        dueDate: _dueDate,
+        synced: isOnline, // Sincronizar se online
+      );
+
+      if (isOnline) {
         await DatabaseService.instance.create(newTask);
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('✓ Tarefa criada'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
       } else {
-        final updatedTask = widget.task!.copyWith(
-          title: _titleController.text.trim(),
-          description: _descriptionController.text.trim(),
-          priority: _priority,
-          completed: _completed,
-          photoPaths: _photoPaths,
-          latitude: _latitude,
-          longitude: _longitude,
-          locationName: _locationName,
-          dueDate: _dueDate,
-        );
-        await DatabaseService.instance.update(updatedTask);
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('✓ Tarefa atualizada'),
-              backgroundColor: Colors.blue,
-            ),
-          );
-        }
+        await DatabaseService.instance.createOffline(newTask);
       }
-
-      if (mounted) Navigator.pop(context, true);
       
-    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro: $e'),
-            backgroundColor: Colors.red,
+            content: Text('✓ Tarefa criada ${isOnline ? '' : '(offline)'}'),
+            backgroundColor: Colors.green,
           ),
         );
       }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+    } else {
+      final updatedTask = widget.task!.copyWith(
+        title: _titleController.text.trim(),
+        description: _descriptionController.text.trim(),
+        priority: _priority,
+        completed: _completed,
+        photoPaths: _photoPaths,
+        latitude: _latitude,
+        longitude: _longitude,
+        locationName: _locationName,
+        dueDate: _dueDate,
+        updatedAt: DateTime.now(),
+        synced: isOnline,
+      );
+
+      if (isOnline) {
+        await DatabaseService.instance.update(updatedTask);
+      } else {
+        await DatabaseService.instance.updateOffline(updatedTask);
+      }
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✓ Tarefa atualizada ${isOnline ? '' : '(offline)'}'),
+            backgroundColor: Colors.blue,
+          ),
+        );
+      }
     }
+
+    if (mounted) Navigator.pop(context, true);
+    
+  } catch (e) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erro: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  } finally {
+    if (mounted) setState(() => _isLoading = false);
   }
+}
 
   @override
   Widget build(BuildContext context) {

@@ -1,7 +1,7 @@
-import 'dart:async';
+/*import 'dart:async';
 import 'dart:math' as math;
 import 'package:sensors_plus/sensors_plus.dart';
-import 'package:vibration/vibration.dart';
+// import 'package:vibration/vibration.dart'; // COMENTADO - TÁ DANDO ERRO
 
 class SensorService {
   static final SensorService instance = SensorService._init();
@@ -64,9 +64,11 @@ class SensorService {
 
   Future<void> _vibrateDevice() async {
     try {
-      if (await Vibration.hasVibrator() ?? false) {
-        await Vibration.vibrate(duration: 100);
-      }
+      // COMENTADO - VIBRAÇÃO TÁ DANDO ERRO
+      // if (await Vibration.hasVibrator() ?? false) {
+      //   await Vibration.vibrate(duration: 100);
+      // }
+      print('📳 Shake detectado (vibração desativada)');
     } catch (e) {
       print('⚠️ Vibração não suportada: $e');
     }
@@ -79,4 +81,4 @@ class SensorService {
     _isActive = false;
     print('⏹️ Detecção de shake parada');
   }
-}
+} %/ COMENTADO - TÁ DANDO ERRO */

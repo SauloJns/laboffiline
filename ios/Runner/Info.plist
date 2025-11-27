@@ -2,92 +2,61 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- CONFIGURAÇÕES BÁSICAS DO APP -->
-	<key>CFBundleDevelopmentRegion</key>
-	<string>$(DEVELOPMENT_LANGUAGE)</string>
-	<key>CFBundleExecutable</key>
-	<string>$(EXECUTABLE_NAME)</string>
-	<key>CFBundleIdentifier</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-	<key>CFBundleInfoDictionaryVersion</key>
-	<string>6.0</string>
-	<key>CFBundleName</key>
-	<string>task_manager</string>
-	<key>CFBundlePackageType</key>
-	<string>APPL</string>
-	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
-	<key>CFBundleSignature</key>
-	<string>????</string>
-	<key>CFBundleVersion</key>
-	<string>1</string>
-	<key>LSRequiresIPhoneOS</key>
-	<true/>
-	<key>UILaunchStoryboardName</key>
-	<string>LaunchScreen</string>
-	<key>UIMainStoryboardFile</key>
-	<string>Main</string>
-	<key>UIRequiredDeviceCapabilities</key>
-	<array>
-		<string>armv7</string>
-	</array>
-	<key>UISupportedInterfaceOrientations</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>UISupportedInterfaceOrientations~ipad</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	
-	<!-- PERMISSÕES PARA CÂMERA -->
-	<key>NSCameraUsageDescription</key>
-	<string>Este app precisa acessar a câmera para tirar fotos das tarefas</string>
-	
-	<!-- PERMISSÕES PARA GALERIA DE FOTOS -->
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Este app precisa acessar a galeria para selecionar fotos para as tarefas</string>
-	
-	<!-- PERMISSÕES PARA LOCALIZAÇÃO (QUANDO EM USO) -->
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Este app precisa acessar sua localização para adicionar posição às tarefas</string>
-	
-	<!-- PERMISSÕES PARA LOCALIZAÇÃO (SEMPRE - OPCIONAL) -->
-	<key>NSLocationAlwaysUsageDescription</key>
-	<string>Este app pode precisar acessar sua localização em background para funcionalidades futuras</string>
-	
-	<!-- PERMISSÕES PARA LOCALIZAÇÃO (BACKGROUND) -->
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Este app pode precisar acessar sua localização em background para funcionalidades futuras</string>
-	
-	<!-- CONFIGURAÇÃO DO FLUTTER -->
-	<key>FLTEnableGoogleMaps</key>
-	<false/>
-	<key>FLTEnableImagePickerPlugin</key>
-	<true/>
-	<key>FLTEnableCameraPlugin</key>
-	<true/>
-	<key>FLTEnableGeolocatorPlugin</key>
-	<true/>
-	
-	<!-- BACKGROUND MODES (OPCIONAL PARA FUTURAS FUNCIONALIDADES) -->
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>location</string>
-		<string>fetch</string>
-	</array>
-	
-	<!-- CONFIGURAÇÕES DE SEGURANÇA -->
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-	</dict>
-	
+    
+    <!-- Permissões iOS -->
+    <key>NSCameraUsageDescription</key>
+    <string>Necessário para tirar fotos das tarefas</string>
+    
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Necessário para adicionar localização às tarefas</string>
+    
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Necessário para selecionar fotos da galeria</string>
+    
+    <!-- Configurações existentes do Flutter -->
+    <key>CFBundleDevelopmentRegion</key>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>task_manager_pro</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$(FLUTTER_BUILD_NAME)</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>CFBundleVersion</key>
+    <string>$(FLUTTER_BUILD_NUMBER)</string>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <key>UILaunchStoryboardName</key>
+    <string>LaunchScreen</string>
+    <key>UIMainStoryboardFile</key>
+    <string>Main</string>
+    <key>UIRequiredDeviceCapabilities</key>
+    <array>
+        <string>armv7</string>
+    </array>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UIViewControllerBasedStatusBarAppearance</key>
+    <false/>
+    
 </dict>
 </plist>

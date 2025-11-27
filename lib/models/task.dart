@@ -14,6 +14,13 @@ class Task {
   final String? locationName;
   final DateTime? dueDate;
 
+  // Novos campos para sincronização
+  final String? serverId;
+  final DateTime? updatedAt;
+  final bool synced;
+  final String? syncError;
+  final DateTime? lastSyncAttempt;
+
   Task({
     this.id,
     required this.title,
@@ -28,13 +35,18 @@ class Task {
     this.longitude,
     this.locationName,
     this.dueDate,
+    this.serverId,
+    DateTime? updatedAt,
+    this.synced = true,
+    this.syncError,
+    this.lastSyncAttempt,
   }) : createdAt = createdAt ?? DateTime.now(),
+       updatedAt = updatedAt ?? DateTime.now(),
        photoPaths = photoPaths ?? [];
 
   bool get hasPhotos => photoPaths.isNotEmpty;
   bool get hasLocation => latitude != null && longitude != null;
   bool get wasCompletedByShake => completedBy == 'shake';
-  
   bool get isOverdue => !completed && dueDate != null && dueDate!.isBefore(DateTime.now());
   bool get isDueToday => !completed && dueDate != null && 
       dueDate!.year == DateTime.now().year &&
@@ -43,6 +55,10 @@ class Task {
   bool get isDueSoon => !completed && dueDate != null && 
       dueDate!.isAfter(DateTime.now()) &&
       dueDate!.difference(DateTime.now()).inDays <= 3;
+  
+  // Novo getter para status de sincronização
+  bool get isPendingSync => !synced;
+  bool get hasSyncError => syncError != null && syncError!.isNotEmpty;
 
   Map<String, dynamic> toMap() {
     return {
@@ -59,6 +75,12 @@ class Task {
       'longitude': longitude,
       'location_name': locationName,
       'due_date': dueDate?.millisecondsSinceEpoch,
+      // Novos campos
+      'server_id': serverId,
+      'updated_at': updatedAt?.millisecondsSinceEpoch,
+      'synced': synced ? 1 : 0,
+      'sync_error': syncError,
+      'last_sync_attempt': lastSyncAttempt?.millisecondsSinceEpoch,
     };
   }
 
@@ -83,6 +105,16 @@ class Task {
       dueDate: map['due_date'] != null
           ? DateTime.fromMillisecondsSinceEpoch(map['due_date'])
           : null,
+      // Novos campos
+      serverId: map['server_id'],
+      updatedAt: map['updated_at'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(map['updated_at'])
+          : null,
+      synced: map['synced'] == 1,
+      syncError: map['sync_error'],
+      lastSyncAttempt: map['last_sync_attempt'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(map['last_sync_attempt'])
+          : null,
     );
   }
 
@@ -100,6 +132,11 @@ class Task {
     double? longitude,
     String? locationName,
     DateTime? dueDate,
+    String? serverId,
+    DateTime? updatedAt,
+    bool? synced,
+    String? syncError,
+    DateTime? lastSyncAttempt,
   }) {
     return Task(
       id: id ?? this.id,
@@ -115,6 +152,50 @@ class Task {
       longitude: longitude ?? this.longitude,
       locationName: locationName ?? this.locationName,
       dueDate: dueDate ?? this.dueDate,
+      serverId: serverId ?? this.serverId,
+      updatedAt: updatedAt ?? this.updatedAt,
+      synced: synced ?? this.synced,
+      syncError: syncError ?? this.syncError,
+      lastSyncAttempt: lastSyncAttempt ?? this.lastSyncAttempt,
+    );
+  }
+
+  // Para API
+  Map<String, dynamic> toApiMap() {
+    return {
+      'id': serverId,
+      'title': title,
+      'description': description,
+      'completed': completed,
+      'priority': priority,
+      'created_at': createdAt.toIso8601String(),
+      'completed_at': completedAt?.toIso8601String(),
+      'completed_by': completedBy,
+      'latitude': latitude,
+      'longitude': longitude,
+      'location_name': locationName,
+      'due_date': dueDate?.toIso8601String(),
+      'updated_at': updatedAt?.toIso8601String(),
+      'local_id': id, // Para identificar no servidor
+    };
+  }
+
+  factory Task.fromApiMap(Map<String, dynamic> map) {
+    return Task(
+      serverId: map['id']?.toString(),
+      title: map['title'],
+      description: map['description'] ?? '',
+      completed: map['completed'] ?? false,
+      priority: map['priority'] ?? 'medium',
+      createdAt: DateTime.parse(map['created_at']),
+      completedAt: map['completed_at'] != null ? DateTime.parse(map['completed_at']) : null,
+      completedBy: map['completed_by'],
+      latitude: map['latitude'],
+      longitude: map['longitude'],
+      locationName: map['location_name'],
+      dueDate: map['due_date'] != null ? DateTime.parse(map['due_date']) : null,
+      updatedAt: map['updated_at'] != null ? DateTime.parse(map['updated_at']) : null,
+      synced: true, // Vindo do servidor = sincronizado
     );
   }
 
@@ -163,6 +244,13 @@ class Task {
     if (completed && completedAt != null) {
       buffer.writeln('✅ Concluída em: ${_formatDate(completedAt!)}');
     }
+
+    // Status de sincronização
+    if (!synced) {
+      buffer.writeln('🔄 Status: Aguardando sincronização');
+    } else if (hasSyncError) {
+      buffer.writeln('❌ Erro de sincronização: $syncError');
+    }
     
     buffer.writeln();
     buffer.writeln('Criado com Task Manager Pro 📱');
@@ -186,6 +274,6 @@ class Task {
 
   @override
   String toString() {
-    return 'Task(id: $id, title: $title, completed: $completed, priority: $priority, photos: ${photoPaths.length})';
+    return 'Task(id: $id, title: $title, completed: $completed, synced: $synced, serverId: $serverId)';
   }
 }

@@ -1,5 +1,5 @@
-name: task_manager
-description: "Aplicativo de gerenciamento de tarefas com recursos nativos"
+name: task_manager_pro
+description: A Flutter task manager with offline-first capabilities
 
 publish_to: 'none'
 
@@ -12,27 +12,37 @@ dependencies:
   flutter:
     sdk: flutter
   
-  # Banco de dados
+  # Persistência
   sqflite: ^2.3.0
   path: ^1.8.3
   
-  # Recursos nativos - AULA 3
+  # Câmera e Fotos
   camera: ^0.10.5
-  permission_handler: ^12.0.1
-  sensors_plus: ^7.0.0
-  vibration: ^3.1.4
-  geolocator: ^11.0.1
-  geocoding: ^2.1.1
+  image_picker: ^1.0.4
   path_provider: ^2.1.1
   
-  # Funcionalidades extras
-  image_picker: ^1.1.2        # GALERIA DE FOTOS - NOVO
-  share_plus: ^7.2.1          # Compartilhamento
+  # Permissões
+  permission_handler: ^11.0.1
+  
+  # Sensores - COMENTADO - TÁ DANDO ERRO
+  # sensors_plus: ^1.3.1  # COMENTADO - TÁ DANDO ERRO
+  # vibration: ^1.7.5     # COMENTADO - TÁ DANDO ERRO
+  
+  # Localização
+  geolocator: ^11.0.1
+  geocoding: ^2.1.1
+  
+  # Conectividade e Sincronização
+  connectivity_plus: ^5.0.1
+  http: ^1.1.0
+  
+  # Compartilhamento
+  share_plus: ^7.0.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^4.0.0
+  flutter_lints: ^3.0.0
 
 flutter:
   uses-material-design: true

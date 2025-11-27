@@ -19,46 +19,31 @@ class TaskCard extends StatelessWidget {
 
   Color _getPriorityColor() {
     switch (task.priority) {
-      case 'urgent':
-        return Colors.red;
-      case 'high':
-        return Colors.orange;
-      case 'medium':
-        return Colors.amber;
-      case 'low':
-        return Colors.green;
-      default:
-        return Colors.grey;
+      case 'urgent': return Colors.red;
+      case 'high': return Colors.orange;
+      case 'medium': return Colors.amber;
+      case 'low': return Colors.green;
+      default: return Colors.grey;
     }
   }
 
   IconData _getPriorityIcon() {
     switch (task.priority) {
-      case 'urgent':
-        return Icons.priority_high;
-      case 'high':
-        return Icons.arrow_upward;
-      case 'medium':
-        return Icons.remove;
-      case 'low':
-        return Icons.arrow_downward;
-      default:
-        return Icons.flag;
+      case 'urgent': return Icons.priority_high;
+      case 'high': return Icons.arrow_upward;
+      case 'medium': return Icons.remove;
+      case 'low': return Icons.arrow_downward;
+      default: return Icons.flag;
     }
   }
 
   String _getPriorityLabel() {
     switch (task.priority) {
-      case 'urgent':
-        return 'Urgente';
-      case 'high':
-        return 'Alta';
-      case 'medium':
-        return 'Média';
-      case 'low':
-        return 'Baixa';
-      default:
-        return 'Normal';
+      case 'urgent': return 'Urgente';
+      case 'high': return 'Alta';
+      case 'medium': return 'Média';
+      case 'low': return 'Baixa';
+      default: return 'Normal';
     }
   }
 
@@ -67,6 +52,25 @@ class TaskCard extends StatelessWidget {
       await Share.share(task.shareText);
     } catch (e) {
       // Erro silencioso
+    }
+  }
+
+  Widget _buildSyncStatus() {
+    if (task.synced) {
+      return const Tooltip(
+        message: 'Sincronizado com o servidor',
+        child: Icon(Icons.cloud_done, size: 16, color: Colors.green),
+      );
+    } else if (task.hasSyncError) {
+      return Tooltip(
+        message: 'Erro de sincronização: ${task.syncError}',
+        child: const Icon(Icons.cloud_off, size: 16, color: Colors.red),
+      );
+    } else {
+      return const Tooltip(
+        message: 'Aguardando sincronização',
+        child: Icon(Icons.cloud_upload, size: 16, color: Colors.orange),
+      );
     }
   }
 
@@ -97,10 +101,20 @@ class TaskCard extends StatelessWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Checkbox(
-                    value: task.completed,
-                    onChanged: onCheckboxChanged,
-                    activeColor: Colors.green,
+                  Stack(
+                    children: [
+                      Checkbox(
+                        value: task.completed,
+                        onChanged: onCheckboxChanged,
+                        activeColor: Colors.green,
+                      ),
+                      if (task.isPendingSync)
+                        Positioned(
+                          top: 0,
+                          right: 0,
+                          child: _buildSyncStatus(),
+                        ),
+                    ],
                   ),
                   
                   const SizedBox(width: 8),
@@ -324,6 +338,37 @@ class TaskCard extends StatelessWidget {
                                         fontSize: 12,
                                         fontWeight: FontWeight.w500,
                                         color: Colors.green,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+
+                            // Status de sincronização
+                            if (!task.synced)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: Colors.orange.withOpacity(0.5),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    _buildSyncStatus(),
+                                    const SizedBox(width: 4),
+                                    const Text(
+                                      'Pendente',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w500,
+                                        color: Colors.orange,
                                       ),
                                     ),
                                   ],

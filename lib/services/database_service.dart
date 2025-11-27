@@ -1,6 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../models/task.dart';
+import '../models/sync_queue.dart';
 
 class DatabaseService {
   static final DatabaseService instance = DatabaseService._init();
@@ -13,14 +14,24 @@ class DatabaseService {
     _database = await _initDB('tasks.db');
     return _database!;
   }
+Future<Task> createOffline(Task task) async {
+  return create(task, sync: false);
+}
 
+Future<int> updateOffline(Task task) async {
+  return update(task, sync: false);
+}
+
+Future<int> deleteOffline(int id) async {
+  return delete(id, sync: false);
+}
   Future<Database> _initDB(String filePath) async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
 
     return await openDatabase(
       path,
-      version: 4,
+      version: 5, // Nova versão para sincronização
       onCreate: _createDB,
       onUpgrade: _migrateDB,
       onDowngrade: onDatabaseDowngradeDelete,
@@ -28,6 +39,7 @@ class DatabaseService {
   }
 
   Future<void> _createDB(Database db, int version) async {
+    // Tabela de tasks
     await db.execute('''
       CREATE TABLE tasks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,7 +54,27 @@ class DatabaseService {
         latitude REAL,
         longitude REAL,
         location_name TEXT,
-        due_date INTEGER
+        due_date INTEGER,
+        server_id TEXT,
+        updated_at INTEGER NOT NULL,
+        synced INTEGER NOT NULL DEFAULT 1,
+        sync_error TEXT,
+        last_sync_attempt INTEGER
+      )
+    ''');
+
+    // Tabela de fila de sincronização
+    await db.execute('''
+      CREATE TABLE sync_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        operation TEXT NOT NULL,
+        table_name TEXT NOT NULL,
+        record_id INTEGER NOT NULL,
+        data TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        last_attempt INTEGER
       )
     ''');
 
@@ -105,10 +137,43 @@ class DatabaseService {
         
         await db.execute('DROP TABLE tasks');
         await db.execute('ALTER TABLE tasks_new RENAME TO tasks');
-        
-        print('✅ Migração para múltiplas fotos concluída');
       } catch (e) {
         print('Erro na migração v3->v4: $e');
+      }
+    }
+
+    if (oldVersion < 5) {
+      try {
+        // Adicionar novas colunas para sincronização
+        await _addColumnIfNotExists(db, 'tasks', 'server_id', 'TEXT');
+        await _addColumnIfNotExists(db, 'tasks', 'updated_at', 'INTEGER');
+        await _addColumnIfNotExists(db, 'tasks', 'synced', 'INTEGER DEFAULT 1');
+        await _addColumnIfNotExists(db, 'tasks', 'sync_error', 'TEXT');
+        await _addColumnIfNotExists(db, 'tasks', 'last_sync_attempt', 'INTEGER');
+
+        // Criar tabela de fila de sincronização
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS sync_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operation TEXT NOT NULL,
+            table_name TEXT NOT NULL,
+            record_id INTEGER NOT NULL,
+            data TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT,
+            last_attempt INTEGER
+          )
+        ''');
+
+        // Atualizar updated_at para tasks existentes
+        await db.execute('''
+          UPDATE tasks SET updated_at = created_at WHERE updated_at IS NULL
+        ''');
+
+        print('✅ Migração para v5 (sincronização) concluída');
+      } catch (e) {
+        print('Erro na migração v4->v5: $e');
       }
     }
   }
@@ -137,18 +202,21 @@ class DatabaseService {
         description: 'Esta é sua primeira tarefa. Toque para editar ou marcar como concluída.',
         priority: 'medium',
         dueDate: DateTime.now().add(const Duration(days: 7)),
+        synced: true,
       ),
       Task(
         title: 'Estudar Flutter - Recursos Nativos',
         description: 'Aprender sobre câmera, sensores e GPS',
         priority: 'high',
         dueDate: DateTime.now().add(const Duration(days: 2)),
+        synced: true,
       ),
       Task(
         title: 'Testar funcionalidade de Shake',
         description: 'Sacuda o celular para completar tarefas rapidamente!',
         priority: 'urgent',
         dueDate: DateTime.now().add(const Duration(days: 1)),
+        synced: true,
       ),
     ];
 
@@ -157,10 +225,23 @@ class DatabaseService {
     }
   }
 
-  Future<Task> create(Task task) async {
+  // ========== OPERAÇÕES DE TASK ==========
+
+  Future<Task> create(Task task, {bool sync = true}) async {
     final db = await database;
-    final id = await db.insert('tasks', task.toMap());
-    return task.copyWith(id: id);
+    
+    // Se não for para sincronizar, marca como não sincronizado
+    final taskToSave = sync ? task : task.copyWith(synced: false);
+    
+    final id = await db.insert('tasks', taskToSave.toMap());
+    final savedTask = taskToSave.copyWith(id: id);
+
+    // Se não for para sincronizar, adiciona à fila
+    if (!sync) {
+      await _addToSyncQueue('CREATE', 'tasks', id, {});
+    }
+
+    return savedTask;
   }
 
   Future<Task?> read(int id) async {
@@ -208,6 +289,131 @@ class DatabaseService {
     return result.map((json) => Task.fromMap(json)).toList();
   }
 
+  Future<List<Task>> getPendingSyncTasks() async {
+    final db = await database;
+    final result = await db.query(
+      'tasks',
+      where: 'synced = 0',
+      orderBy: 'updated_at DESC',
+    );
+    return result.map((json) => Task.fromMap(json)).toList();
+  }
+
+  Future<int> update(Task task, {bool sync = true}) async {
+    final db = await database;
+    
+    // Atualiza o updated_at
+    final taskToUpdate = task.copyWith(
+      updatedAt: DateTime.now(),
+      synced: sync ? task.synced : false,
+    );
+
+    final result = await db.update(
+      'tasks',
+      taskToUpdate.toMap(),
+      where: 'id = ?',
+      whereArgs: [task.id],
+    );
+
+    // Se não for para sincronizar, adiciona à fila
+    if (!sync && result > 0) {
+      await _addToSyncQueue('UPDATE', 'tasks', task.id!, {});
+    }
+
+    return result;
+  }
+
+  Future<int> delete(int id, {bool sync = true}) async {
+    final db = await database;
+    
+    final result = await db.delete(
+      'tasks',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+
+    // Se não for para sincronizar, adiciona à fila
+    if (!sync && result > 0) {
+      await _addToSyncQueue('DELETE', 'tasks', id, {});
+    }
+
+    return result;
+  }
+
+  // ========== FILA DE SINCRONIZAÇÃO ==========
+
+  Future<void> _addToSyncQueue(String operation, String tableName, int recordId, Map<String, dynamic> data) async {
+    final db = await database;
+    
+    final syncItem = SyncQueue(
+      operation: operation,
+      tableName: tableName,
+      recordId: recordId,
+      data: data,
+    );
+
+    await db.insert('sync_queue', syncItem.toMap());
+    print('✅ Item adicionado à fila de sincronização: $operation $tableName:$recordId');
+  }
+
+  Future<List<SyncQueue>> getPendingSyncItems() async {
+    final db = await database;
+    final result = await db.query(
+      'sync_queue',
+      orderBy: 'created_at ASC',
+    );
+    return result.map((json) => SyncQueue.fromMap(json)).toList();
+  }
+
+  Future<void> removeFromSyncQueue(int id) async {
+    final db = await database;
+    await db.delete(
+      'sync_queue',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> updateSyncQueueItem(SyncQueue item) async {
+    final db = await database;
+    await db.update(
+      'sync_queue',
+      item.toMap(),
+      where: 'id = ?',
+      whereArgs: [item.id],
+    );
+  }
+
+  Future<void> markTaskAsSynced(int taskId, String? serverId) async {
+    final db = await database;
+    await db.update(
+      'tasks',
+      {
+        'synced': 1,
+        'server_id': serverId,
+        'sync_error': null,
+        'last_sync_attempt': DateTime.now().millisecondsSinceEpoch,
+      },
+      where: 'id = ?',
+      whereArgs: [taskId],
+    );
+  }
+
+  Future<void> markTaskAsSyncFailed(int taskId, String error) async {
+    final db = await database;
+    await db.update(
+      'tasks',
+      {
+        'sync_error': error,
+        'last_sync_attempt': DateTime.now().millisecondsSinceEpoch,
+      },
+      where: 'id = ?',
+      whereArgs: [taskId],
+    );
+  }
+
+  // ========== MÉTODOS EXISTENTES ==========
+
   Future<List<Task>> getOverdueTasks() async {
     final db = await database;
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -236,25 +442,6 @@ class DatabaseService {
     return result.map((json) => Task.fromMap(json)).toList();
   }
 
-  Future<int> update(Task task) async {
-    final db = await database;
-    return await db.update(
-      'tasks',
-      task.toMap(),
-      where: 'id = ?',
-      whereArgs: [task.id],
-    );
-  }
-
-  Future<int> delete(int id) async {
-    final db = await database;
-    return await db.delete(
-      'tasks',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
-  }
-
   Future<int> getTaskCount() async {
     final db = await database;
     final result = await db.rawQuery('SELECT COUNT(*) FROM tasks');
@@ -280,22 +467,12 @@ class DatabaseService {
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
-  Future<List<Task>> getTasksNearLocation({
-    required double latitude,
-    required double longitude,
-    double radiusInMeters = 1000,
-  }) async {
-    final allTasks = await readAll();
-    
-    return allTasks.where((task) {
-      if (!task.hasLocation) return false;
-      
-      final latDiff = (task.latitude! - latitude).abs();
-      final lonDiff = (task.longitude! - longitude).abs();
-      final distance = ((latDiff * 111000) + (lonDiff * 111000)) / 2;
-      
-      return distance <= radiusInMeters;
-    }).toList();
+  Future<int> getPendingSyncCount() async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) FROM tasks WHERE synced = 0'
+    );
+    return Sqflite.firstIntValue(result) ?? 0;
   }
 
   Future<void> close() async {

@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import '../models/task.dart';
 import '../services/database_service.dart';
-import '../services/sensor_service.dart';
-import '../services/location_service.dart';
+import '../services/connectivity_service.dart';
+import '../services/sync_service.dart';
 import '../screens/task_form_screen.dart';
 import '../widgets/task_card.dart';
+import '../widgets/connectivity_status.dart';
 
 class TaskListScreen extends StatefulWidget {
   const TaskListScreen({super.key});
@@ -22,20 +23,30 @@ class _TaskListScreenState extends State<TaskListScreen> {
   void initState() {
     super.initState();
     _loadTasks();
-    _setupShakeDetection();
     _checkOverdueTasks();
+    _setupConnectivityListener();
+    _setupAutoSync();
   }
 
   @override
   void dispose() {
-    SensorService.instance.stop();
+    ConnectivityService.instance.dispose();
+    SyncService.instance.dispose();
     super.dispose();
   }
 
-  void _setupShakeDetection() {
-    SensorService.instance.startShakeDetection(() {
-      _showShakeDialog();
-    });
+  void _setupConnectivityListener() {
+    ConnectivityService.instance.addListener(_onConnectivityChanged);
+  }
+
+  void _onConnectivityChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _setupAutoSync() {
+    SyncService.instance.setupAutoSync();
   }
 
   void _checkOverdueTasks() async {
@@ -58,109 +69,6 @@ class _TaskListScreenState extends State<TaskListScreen> {
           ),
         ),
       );
-    }
-  }
-
-  void _showShakeDialog() {
-    final List<Task> pendingTasks = _tasks.where((t) => !t.completed).toList();
-    
-    if (pendingTasks.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('🎉 Nenhuma tarefa pendente!'),
-          backgroundColor: Colors.green,
-        ),
-      );
-      return;
-    }
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.vibration, color: Colors.blue),
-            SizedBox(width: 8),
-            Text('Shake detectado!'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Selecione uma tarefa para completar:'),
-            const SizedBox(height: 16),
-            ...pendingTasks.take(3).map((task) => ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(
-                task.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              subtitle: task.dueDate != null ? Text(
-                'Vence: ${_formatDate(task.dueDate!)}',
-                style: TextStyle(
-                  color: task.isOverdue ? Colors.red : null,
-                ),
-              ) : null,
-              trailing: IconButton(
-                icon: const Icon(Icons.check_circle, color: Colors.green),
-                onPressed: () => _completeTaskByShake(task),
-              ),
-            )),
-            if (pendingTasks.length > 3)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  '+ ${pendingTasks.length - 3} outras',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[600],
-                  ),
-                ),
-              ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _completeTaskByShake(Task task) async {
-    try {
-      final Task updated = task.copyWith(
-        completed: true,
-        completedAt: DateTime.now(),
-        completedBy: 'shake',
-      );
-
-      await DatabaseService.instance.update(updated);
-      Navigator.pop(context);
-      await _loadTasks();
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✅ "${task.title}" completa via shake!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    } catch (e) {
-      Navigator.pop(context);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
     }
   }
 
@@ -189,12 +97,37 @@ class _TaskListScreenState extends State<TaskListScreen> {
     }
   }
 
+  Future<void> _syncTasks() async {
+    final success = await SyncService.instance.forceSync();
+    
+    if (mounted) {
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Sincronização concluída!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        await _loadTasks();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('❌ Falha na sincronização'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   List<Task> get _filteredTasks {
     switch (_filter) {
       case 'pending':
         return _tasks.where((t) => !t.completed).toList();
       case 'completed':
         return _tasks.where((t) => t.completed).toList();
+      case 'pending_sync':
+        return _tasks.where((t) => !t.synced).toList();
       default:
         return _tasks;
     }
@@ -205,12 +138,14 @@ class _TaskListScreenState extends State<TaskListScreen> {
     final int completed = _tasks.where((t) => t.completed).length;
     final int pending = total - completed;
     final int overdue = _tasks.where((t) => t.isOverdue).length;
+    final int pendingSync = _tasks.where((t) => !t.synced).length;
     
     return {
       'total': total,
       'completed': completed,
       'pending': pending,
       'overdue': overdue,
+      'pending_sync': pendingSync,
     };
   }
 
@@ -236,7 +171,12 @@ class _TaskListScreenState extends State<TaskListScreen> {
 
     if (confirm == true) {
       try {
-        await DatabaseService.instance.delete(task.id!);
+        if (ConnectivityService.instance.isOnline) {
+          await DatabaseService.instance.delete(task.id!);
+        } else {
+          await DatabaseService.instance.deleteOffline(task.id!);
+        }
+        
         await _loadTasks();
 
         if (mounted) {
@@ -266,9 +206,16 @@ class _TaskListScreenState extends State<TaskListScreen> {
         completed: !task.completed,
         completedAt: !task.completed ? DateTime.now() : null,
         completedBy: !task.completed ? 'manual' : null,
+        updatedAt: DateTime.now(),
+        synced: ConnectivityService.instance.isOnline,
       );
 
-      await DatabaseService.instance.update(updated);
+      if (ConnectivityService.instance.isOnline) {
+        await DatabaseService.instance.update(updated);
+      } else {
+        await DatabaseService.instance.updateOffline(updated);
+      }
+      
       await _loadTasks();
     } catch (e) {
       if (mounted) {
@@ -303,6 +250,7 @@ class _TaskListScreenState extends State<TaskListScreen> {
   Widget build(BuildContext context) {
     final Map<String, int> stats = _statistics;
     final List<Task> filteredTasks = _filteredTasks;
+    final isOnline = ConnectivityService.instance.isOnline;
 
     return Scaffold(
       appBar: AppBar(
@@ -310,6 +258,19 @@ class _TaskListScreenState extends State<TaskListScreen> {
         backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
         actions: [
+          // Indicador de sincronização pendente
+          if (stats['pending_sync']! > 0)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Badge.count(
+                count: stats['pending_sync']!,
+                backgroundColor: Colors.orange,
+                textColor: Colors.white,
+                child: const Icon(Icons.cloud_upload),
+              ),
+            ),
+          
+          // Indicador de tarefas vencidas
           if (stats['overdue']! > 0)
             Padding(
               padding: const EdgeInsets.only(right: 8),
@@ -320,6 +281,34 @@ class _TaskListScreenState extends State<TaskListScreen> {
                 child: const Icon(Icons.warning_amber),
               ),
             ),
+          
+          // Botão de sincronização
+          if (SyncService.instance.isSyncing)
+            const Padding(
+              padding: EdgeInsets.only(right: 8),
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              ),
+            )
+          else if (!isOnline && stats['pending_sync']! > 0)
+            IconButton(
+              onPressed: null,
+              icon: const Icon(Icons.cloud_off),
+              tooltip: 'Offline - ${stats['pending_sync']} pendentes',
+            )
+          else if (stats['pending_sync']! > 0)
+            IconButton(
+              onPressed: _syncTasks,
+              icon: const Icon(Icons.sync),
+              tooltip: 'Sincronizar ${stats['pending_sync']} itens',
+            ),
+          
+          // Menu de filtro
           PopupMenuButton<String>(
             icon: const Icon(Icons.filter_list),
             onSelected: (String value) {
@@ -356,96 +345,143 @@ class _TaskListScreenState extends State<TaskListScreen> {
                   ],
                 ),
               ),
+              if (stats['pending_sync']! > 0)
+                PopupMenuItem(
+                  value: 'pending_sync',
+                  child: Row(
+                    children: [
+                      const Icon(Icons.cloud_upload, color: Colors.orange),
+                      const SizedBox(width: 8),
+                      const Text('Pendentes Sync'),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.orange,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          stats['pending_sync']!.toString(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
             ],
           ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: _loadTasks,
-        child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : Column(
-                children: [
-                  Container(
-                    margin: const EdgeInsets.all(16),
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [Colors.blue.shade400, Colors.blue.shade700],
-                      ),
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.blue.withOpacity(0.3),
-                          blurRadius: 8,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        _StatItem(
-                          label: 'Total',
-                          value: stats['total'].toString(),
-                          icon: Icons.list_alt,
-                        ),
-                        Container(
-                          width: 1,
-                          height: 40,
-                          color: Colors.white.withOpacity(0.3),
-                        ),
-                        _StatItem(
-                          label: 'Concluídas',
-                          value: stats['completed'].toString(),
-                          icon: Icons.check_circle,
-                        ),
-                        Container(
-                          width: 1,
-                          height: 40,
-                          color: Colors.white.withOpacity(0.3),
-                        ),
-                        _StatItem(
-                          label: 'Pendentes',
-                          value: stats['pending'].toString(),
-                          icon: Icons.pending_actions,
-                        ),
-                        if (stats['overdue']! > 0) ...[
-                          Container(
-                            width: 1,
-                            height: 40,
-                            color: Colors.white.withOpacity(0.3),
-                          ),
-                          _StatItem(
-                            label: 'Vencidas',
-                            value: stats['overdue'].toString(),
-                            icon: Icons.warning_amber,
-                            isWarning: true,
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
+      body: Column(
+        children: [
+          // Status de conectividade
+          ConnectivityStatus(
+            onSyncPressed: _syncTasks,
+          ),
 
-                  Expanded(
-                    child: filteredTasks.isEmpty
-                        ? _buildEmptyState()
-                        : ListView.builder(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            itemCount: filteredTasks.length,
-                            itemBuilder: (context, int index) {
-                              final Task task = filteredTasks[index];
-                              return TaskCard(
-                                task: task,
-                                onTap: () => _openTaskForm(task),
-                                onDelete: () => _deleteTask(task),
-                                onCheckboxChanged: (bool? value) => _toggleComplete(task),
-                              );
-                            },
-                          ),
+          // Estatísticas
+          Container(
+            margin: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Colors.blue.shade400, Colors.blue.shade700],
+              ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.blue.withOpacity(0.3),
+                  blurRadius: 8,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _StatItem(
+                  label: 'Total',
+                  value: stats['total'].toString(),
+                  icon: Icons.list_alt,
+                ),
+                Container(
+                  width: 1,
+                  height: 40,
+                  color: Colors.white.withOpacity(0.3),
+                ),
+                _StatItem(
+                  label: 'Concluídas',
+                  value: stats['completed'].toString(),
+                  icon: Icons.check_circle,
+                ),
+                Container(
+                  width: 1,
+                  height: 40,
+                  color: Colors.white.withOpacity(0.3),
+                ),
+                _StatItem(
+                  label: 'Pendentes',
+                  value: stats['pending'].toString(),
+                  icon: Icons.pending_actions,
+                ),
+                if (stats['overdue']! > 0) ...[
+                  Container(
+                    width: 1,
+                    height: 40,
+                    color: Colors.white.withOpacity(0.3),
+                  ),
+                  _StatItem(
+                    label: 'Vencidas',
+                    value: stats['overdue'].toString(),
+                    icon: Icons.warning_amber,
+                    isWarning: true,
                   ),
                 ],
-              ),
+                if (stats['pending_sync']! > 0) ...[
+                  Container(
+                    width: 1,
+                    height: 40,
+                    color: Colors.white.withOpacity(0.3),
+                  ),
+                  _StatItem(
+                    label: 'Pend. Sync',
+                    value: stats['pending_sync'].toString(),
+                    icon: Icons.cloud_upload,
+                    isWarning: true,
+                  ),
+                ],
+              ],
+            ),
+          ),
+
+          // Lista de tarefas
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: _loadTasks,
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : filteredTasks.isEmpty
+                      ? _buildEmptyState()
+                      : ListView.builder(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          itemCount: filteredTasks.length,
+                          itemBuilder: (context, int index) {
+                            final Task task = filteredTasks[index];
+                            return TaskCard(
+                              task: task,
+                              onTap: () => _openTaskForm(task),
+                              onDelete: () => _deleteTask(task),
+                              onCheckboxChanged: (bool? value) => _toggleComplete(task),
+                            );
+                          },
+                        ),
+            ),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openTaskForm(),
@@ -469,6 +505,10 @@ class _TaskListScreenState extends State<TaskListScreen> {
       case 'completed':
         message = '📋 Nenhuma tarefa concluída ainda';
         icon = Icons.pending_outlined;
+        break;
+      case 'pending_sync':
+        message = '✅ Todas as tarefas estão sincronizadas!';
+        icon = Icons.cloud_done;
         break;
       default:
         message = '📝 Nenhuma tarefa ainda.\nToque em + para criar!';
