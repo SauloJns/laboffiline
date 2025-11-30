@@ -6,97 +6,68 @@ import '../services/database_service.dart';
 class ApiService {
   static final ApiService instance = ApiService._init();
   
-  // URL base da API - altere para sua API real
-  static const String baseUrl = 'https://your-api.com/api';
+  static const String baseUrl = 'http://10.0.2.2:3000/api';
   static const Duration timeout = Duration(seconds: 10);
 
   ApiService._init();
 
-  // Simulação de API para demonstração
-  bool _simulateOffline = false;
-  bool _simulateError = false;
-
-  void setSimulateOffline(bool offline) {
-    _simulateOffline = offline;
-  }
-
-  void setSimulateError(bool error) {
-    _simulateError = error;
-  }
-
-  // Verificar se a API está disponível
   Future<bool> isApiAvailable() async {
-    if (_simulateOffline) return false;
-    
-    // SEMPRE RETORNA TRUE PARA DEMONSTRAÇÃO
-    return true;
+    try {
+      final response = await http
+          .get(Uri.parse('$baseUrl/health'))
+          .timeout(const Duration(seconds: 5));
+      return response.statusCode == 200;
+    } catch (e) {
+      print('❌ Servidor não disponível: $e');
+      return false;
+    }
   }
 
-  // Sincronizar todas as tarefas - VERSÃO SIMULADA
   Future<List<Task>> syncTasks(List<Task> localTasks) async {
-    if (_simulateOffline) {
-      throw Exception('Simulação: API offline');
-    }
+    try {
+      final response = await http
+          .get(Uri.parse('$baseUrl/tasks'))
+          .timeout(timeout);
 
-    if (_simulateError) {
-      throw Exception('Simulação: Erro de servidor');
-    }
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        final List<Task> serverTasks = data.map((json) => Task.fromApiMap(json)).toList();
 
-    print('🔄 Simulando sync de ${localTasks.length} tasks');
-    
-    // SIMULA PROCESSAMENTO
-    await Future.delayed(const Duration(seconds: 2));
-    
-    // Marca todas as tasks pendentes como sincronizadas
-    final db = await DatabaseService.instance.database;
-    for (final task in localTasks.where((t) => !t.synced)) {
-      await db.update(
-        'tasks',
-        {
-          'synced': 1,
-          'server_id': 'server_${task.id}_${DateTime.now().millisecondsSinceEpoch}',
-          'sync_error': null,
-          'last_sync_attempt': DateTime.now().millisecondsSinceEpoch,
-        },
-        where: 'id = ?',
-        whereArgs: [task.id],
-      );
-    }
+        print('🔄 Sync: ${serverTasks.length} tasks do servidor');
 
-    print('✅ Sync simulado concluído! Todas as tasks marcadas como sincronizadas.');
-    
-    // Retorna as tasks atualizadas
-    final updatedTasks = await DatabaseService.instance.readAll();
-    return updatedTasks;
+        return _resolveConflicts(localTasks, serverTasks);
+      } else {
+        throw Exception('Erro no servidor: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('❌ Erro na sincronização: $e');
+      rethrow;
+    }
   }
 
-  // Resolver conflitos LWW - VERSÃO SIMULADA
   List<Task> _resolveConflicts(List<Task> localTasks, List<Task> serverTasks) {
     final Map<String, Task> mergedTasks = {};
 
-    // Adicionar tasks do servidor
     for (final serverTask in serverTasks) {
       if (serverTask.serverId != null) {
         mergedTasks[serverTask.serverId!] = serverTask;
       }
     }
 
-    // Mesclar com tasks locais (LWW)
     for (final localTask in localTasks) {
       if (localTask.serverId != null && mergedTasks.containsKey(localTask.serverId)) {
-        // Conflito: verificar qual é mais recente
         final Task serverTask = mergedTasks[localTask.serverId]!;
         
-        if (localTask.updatedAt!.isAfter(serverTask.updatedAt!)) {
-          // Local é mais recente - sobrescrever
+        final localUpdated = localTask.updatedAt ?? localTask.createdAt;
+        final serverUpdated = serverTask.updatedAt ?? serverTask.createdAt;
+        
+        if (localUpdated!.isAfter(serverUpdated!)) {
           mergedTasks[localTask.serverId!] = localTask;
-          print('⚖️ Conflito resolvido: LOCAL wins (mais recente)');
+          print('⚖️ LOCAL wins: "${localTask.title}"');
         } else {
-          // Server wins - mantém a do servidor
-          print('⚖️ Conflito resolvido: SERVER wins (mais recente)');
+          print('⚖️ SERVER wins: "${serverTask.title}"');
         }
       } else if (localTask.serverId == null) {
-        // Task local nova - adicionar com ID temporário
         final String tempId = 'local_${localTask.id}';
         mergedTasks[tempId] = localTask;
       }
@@ -104,127 +75,85 @@ class ApiService {
 
     return mergedTasks.values.toList();
   }
-
-  // Criar task no servidor - VERSÃO SIMULADA
   Future<Task> createTask(Task task) async {
-    if (_simulateOffline) throw Exception('Simulação: API offline');
-    if (_simulateError) throw Exception('Simulação: Erro de servidor');
+    final response = await http
+        .post(
+          Uri.parse('$baseUrl/tasks'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode(task.toApiMap()),
+        )
+        .timeout(timeout);
 
-    print('🔄 Simulando criação da task: "${task.title}"');
-    
-    // SIMULA CRIAÇÃO NO SERVIDOR
-    await Future.delayed(const Duration(seconds: 1));
-    
-    // Retorna task com serverId simulado
-    return task.copyWith(
-      serverId: 'server_${task.id}_${DateTime.now().millisecondsSinceEpoch}',
-      synced: true,
-    );
+    if (response.statusCode == 201) {
+      final Map<String, dynamic> data = json.decode(response.body);
+      return Task.fromApiMap(data);
+    } else {
+      throw Exception('Erro ao criar task: ${response.statusCode}');
+    }
   }
 
-  // Atualizar task no servidor - VERSÃO SIMULADA
   Future<Task> updateTask(Task task) async {
-    if (_simulateOffline) throw Exception('Simulação: API offline');
-    if (_simulateError) throw Exception('Simulação: Erro de servidor');
+    if (task.serverId == null) {
+      throw Exception('Task não tem serverId');
+    }
 
-    print('🔄 Simulando atualização da task: "${task.title}"');
-    
-    // SIMULA ATUALIZAÇÃO NO SERVIDOR
-    await Future.delayed(const Duration(seconds: 1));
-    
-    return task.copyWith(synced: true);
+    final response = await http
+        .put(
+          Uri.parse('$baseUrl/tasks/${task.serverId}'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode(task.toApiMap()),
+        )
+        .timeout(timeout);
+
+    if (response.statusCode == 200) {
+      final Map<String, dynamic> data = json.decode(response.body);
+      return Task.fromApiMap(data);
+    } else {
+      throw Exception('Erro ao atualizar task: ${response.statusCode}');
+    }
   }
 
-  // Deletar task no servidor - VERSÃO SIMULADA
   Future<void> deleteTask(String serverId) async {
-    if (_simulateOffline) throw Exception('Simulação: API offline');
-    if (_simulateError) throw Exception('Simulação: Erro de servidor');
+    final response = await http
+        .delete(Uri.parse('$baseUrl/tasks/$serverId'))
+        .timeout(timeout);
 
-    print('🔄 Simulando exclusão da task: $serverId');
-    
-    // SIMULA EXCLUSÃO NO SERVIDOR
-    await Future.delayed(const Duration(seconds: 1));
-    
-    print('✅ Task $serverId excluída com sucesso (simulado)');
+    if (response.statusCode != 200 && response.statusCode != 204) {
+      throw Exception('Erro ao deletar task: ${response.statusCode}');
+    }
   }
 
-  // Processar item da fila de sincronização - VERSÃO SIMULADA
   Future<bool> processSyncItem(Map<String, dynamic> item) async {
     try {
       final String operation = item['operation'];
       final int recordId = item['recordId'];
 
-      print('🔄 Processando item da fila: $operation task $recordId');
-      
-      // SIMULA PROCESSAMENTO
-      await Future.delayed(const Duration(seconds: 1));
+      final task = await DatabaseService.instance.read(recordId);
+      if (task == null) return false;
 
-      final db = await DatabaseService.instance.database;
-      
       switch (operation) {
         case 'CREATE':
-          // Marca como sincronizada
-          await db.update(
-            'tasks',
-            {
-              'synced': 1,
-              'server_id': 'server_${recordId}_${DateTime.now().millisecondsSinceEpoch}',
-              'sync_error': null,
-            },
-            where: 'id = ?',
-            whereArgs: [recordId],
-          );
-          print('✅ Task $recordId criada no servidor (simulado)');
+          final createdTask = await createTask(task);
+          await DatabaseService.instance.markTaskAsSynced(task.id!, createdTask.serverId);
           break;
-        
         case 'UPDATE':
-          // Marca como sincronizada
-          await db.update(
-            'tasks',
-            {
-              'synced': 1,
-              'sync_error': null,
-            },
-            where: 'id = ?',
-            whereArgs: [recordId],
-          );
-          print('✅ Task $recordId atualizada no servidor (simulado)');
+          if (task.serverId != null) {
+            await updateTask(task);
+            await DatabaseService.instance.markTaskAsSynced(task.id!, task.serverId);
+          }
           break;
-        
         case 'DELETE':
-          // Apenas marca como processada (em um caso real, deletaria do servidor)
-          print('✅ Task $recordId marcada para exclusão (simulado)');
+          if (task.serverId != null) {
+            await deleteTask(task.serverId!);
+          }
           break;
       }
       
       return true;
-      
     } catch (e) {
-      print('❌ Erro ao processar item da fila: $e');
-      
-      // Marca como erro de sync
-      final db = await DatabaseService.instance.database;
-      await db.update(
-        'tasks',
-        {
-          'sync_error': e.toString(),
-          'last_sync_attempt': DateTime.now().millisecondsSinceEpoch,
-        },
-        where: 'id = ?',
-        whereArgs: [item['recordId']],
-      );
-      
+      print('❌ Erro ao processar item: $e');
+      await DatabaseService.instance.markTaskAsSyncFailed(item['recordId'], e.toString());
       return false;
     }
-  }
-
-  // Método auxiliar para simular resposta do servidor
-  Future<Map<String, dynamic>> _simulateServerResponse() async {
-    await Future.delayed(const Duration(seconds: 1));
-    return {
-      'success': true,
-      'message': 'Operação simulada com sucesso',
-      'timestamp': DateTime.now().toIso8601String(),
-    };
   }
 }

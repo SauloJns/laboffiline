@@ -14,21 +14,18 @@ class SyncService {
   bool get isSyncing => _isSyncing;
   DateTime? get lastSync => _lastSync;
 
-  // Sincronização automática quando a conexão retorna
   void setupAutoSync() {
     ConnectivityService.instance.addListener(_onConnectivityChanged);
   }
 
   void _onConnectivityChanged() {
     if (ConnectivityService.instance.isOnline) {
-      // Esperar um pouco para garantir que a conexão está estável
       Future.delayed(const Duration(seconds: 2), () {
         syncData();
       });
     }
   }
 
-  // Sincronizar todos os dados
   Future<bool> syncData() async {
     if (_isSyncing) {
       print('⏳ Sincronização já em andamento...');
@@ -44,30 +41,46 @@ class SyncService {
     print('🔄 Iniciando sincronização...');
 
     try {
-      // 1. Buscar tasks pendentes de sincronização
       final pendingTasks = await DatabaseService.instance.getPendingSyncTasks();
       print('📋 ${pendingTasks.length} tasks pendentes de sincronização');
 
-      // 2. Buscar tasks do servidor e resolver conflitos
       final allLocalTasks = await DatabaseService.instance.readAll();
       final synchronizedTasks = await ApiService.instance.syncTasks(allLocalTasks);
 
-      // 3. Atualizar tasks locais com dados do servidor
-      for (final syncedTask in synchronizedTasks) {
-        // Encontrar task local correspondente
-        final localTask = allLocalTasks.firstWhere(
-          (t) => t.serverId == syncedTask.serverId || t.id == syncedTask.id,
-          orElse: () => syncedTask,
-        );
+      print('💾 Salvando ${synchronizedTasks.length} tasks no banco local...');
 
-        // Atualizar apenas se necessário
-        if (localTask.updatedAt == null || 
-            syncedTask.updatedAt!.isAfter(localTask.updatedAt!)) {
-          await DatabaseService.instance.update(syncedTask);
+      for (final syncedTask in synchronizedTasks) {
+        try {
+          final existingTasks = await DatabaseService.instance.readAll();
+          final existingTask = existingTasks.firstWhere(
+            (t) => t.serverId == syncedTask.serverId,
+            orElse: () => Task(id: -1, title: ''), 
+          );
+
+          if (existingTask.id != null && existingTask.id! > 0) {
+            final taskToUpdate = syncedTask.copyWith(id: existingTask.id);
+            await DatabaseService.instance.update(taskToUpdate);
+            print('📝 Task atualizada: "${syncedTask.title}" (local: ${existingTask.id})');
+          } else {
+            final createdTask = await DatabaseService.instance.create(syncedTask);
+            print('🆕 Task criada: "${createdTask.title}" (server: ${syncedTask.serverId})');
+          }
+        } catch (e) {
+          print('❌ Erro ao salvar task "${syncedTask.title}": $e');
         }
       }
 
-      // 4. Processar fila de sincronização
+      print('🧹 Verificando tasks locais obsoletas...');
+      final currentLocalTasks = await DatabaseService.instance.readAll();
+      final serverTaskIds = synchronizedTasks.map((t) => t.serverId).where((id) => id != null).toSet();
+
+      for (final localTask in currentLocalTasks) {
+        if (localTask.serverId != null && !serverTaskIds.contains(localTask.serverId)) {
+          await DatabaseService.instance.delete(localTask.id!);
+          print('🗑️ Task removida: "${localTask.title}" (não existe no servidor)');
+        }
+      }
+
       final syncQueue = await DatabaseService.instance.getPendingSyncItems();
       print('📨 ${syncQueue.length} itens na fila de sincronização');
 
@@ -84,7 +97,6 @@ class SyncService {
             await DatabaseService.instance.removeFromSyncQueue(item.id!);
             print('✅ Item ${item.id} sincronizado com sucesso');
           } else {
-            // Incrementar contador de tentativas
             final updatedItem = item.copyWith(
               retryCount: item.retryCount + 1,
               lastAttempt: DateTime.now(),
@@ -105,7 +117,7 @@ class SyncService {
       }
 
       _lastSync = DateTime.now();
-      print('✅ Sincronização concluída em ${_lastSync}');
+      print('✅ Sincronização concluída em $_lastSync');
       return true;
 
     } catch (e) {
@@ -116,13 +128,11 @@ class SyncService {
     }
   }
 
-  // Forçar sincronização manual
   Future<bool> forceSync() async {
     print('🔄 Forçando sincronização manual...');
     return await syncData();
   }
 
-  // Verificar status da sincronização
   Future<SyncStatus> getSyncStatus() async {
     final pendingCount = await DatabaseService.instance.getPendingSyncCount();
     final queueItems = await DatabaseService.instance.getPendingSyncItems();

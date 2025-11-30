@@ -253,7 +253,7 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
         longitude: _longitude,
         locationName: _locationName,
         dueDate: _dueDate,
-        synced: isOnline, // Sincronizar se online
+        synced: isOnline, 
       );
 
       if (isOnline) {

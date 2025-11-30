@@ -258,7 +258,6 @@ class _TaskListScreenState extends State<TaskListScreen> {
         backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
         actions: [
-          // Indicador de sincronização pendente
           if (stats['pending_sync']! > 0)
             Padding(
               padding: const EdgeInsets.only(right: 8),
@@ -270,7 +269,6 @@ class _TaskListScreenState extends State<TaskListScreen> {
               ),
             ),
           
-          // Indicador de tarefas vencidas
           if (stats['overdue']! > 0)
             Padding(
               padding: const EdgeInsets.only(right: 8),
@@ -282,7 +280,6 @@ class _TaskListScreenState extends State<TaskListScreen> {
               ),
             ),
           
-          // Botão de sincronização
           if (SyncService.instance.isSyncing)
             const Padding(
               padding: EdgeInsets.only(right: 8),
@@ -308,7 +305,6 @@ class _TaskListScreenState extends State<TaskListScreen> {
               tooltip: 'Sincronizar ${stats['pending_sync']} itens',
             ),
           
-          // Menu de filtro
           PopupMenuButton<String>(
             icon: const Icon(Icons.filter_list),
             onSelected: (String value) {
@@ -378,12 +374,10 @@ class _TaskListScreenState extends State<TaskListScreen> {
       ),
       body: Column(
         children: [
-          // Status de conectividade
           ConnectivityStatus(
             onSyncPressed: _syncTasks,
           ),
 
-          // Estatísticas
           Container(
             margin: const EdgeInsets.all(16),
             padding: const EdgeInsets.all(20),
@@ -458,7 +452,6 @@ class _TaskListScreenState extends State<TaskListScreen> {
             ),
           ),
 
-          // Lista de tarefas
           Expanded(
             child: RefreshIndicator(
               onRefresh: _loadTasks,
